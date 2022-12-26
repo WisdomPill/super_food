@@ -1,14 +1,7 @@
 FROM python:3.8-alpine
 
-# create user `eyetrack` and add it to group `eyetrack`
-RUN addgroup -S eyetrack && adduser -S -G eyetrack eyetrack
-
-# create logs directory and add logrotate rule
-RUN mkdir /var/log/eyetrack
-COPY docker/logrotate/eyetrack /etc/logrotate.d/
-
-# assign permissions to `eyetrack`
-RUN chown eyetrack:eyetrack /var/log/eyetrack
+# create user `super_food` and add it to group `super_food`
+RUN addgroup -S super_food && adduser -S -G super_food super_food
 
 ARG dev
 
@@ -44,8 +37,8 @@ RUN apk add --no-cache --virtual .build-deps \
     && apk del .build-deps
 
 # set envirnoment variables
-ENV SRC=timing_services
-ENV USER_HOME=/home/eyetrack
+ENV SRC=super_food
+ENV USER_HOME=/home/super_food
 ENV CODE_DIR=$USER_HOME/$SRC
 
 WORKDIR $CODE_DIR
@@ -53,8 +46,8 @@ WORKDIR $CODE_DIR
 # copy all the code
 COPY . $CODE_DIR
 
-RUN chown -R eyetrack:eyetrack $CODE_DIR
+RUN chown -R super_food:super_food $CODE_DIR
 
-USER eyetrack
+USER super_food
 
 ENTRYPOINT ["python3", "manage.py"]

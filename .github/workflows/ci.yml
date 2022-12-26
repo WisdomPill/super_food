@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [ 'main' ]
+  pull_request:
+
+concurrency:
+  # From https://docs.github.com/en/actions/using-jobs/using-concurrency
+  #
+  # github.head_ref - is a branch name on pull request [0]
+  # github.run_id - run number, which will be unique [0]
+  #
+  # [0] https://docs.github.com/en/actions/learn-github-actions/contexts#github-context
+  group: ${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  BASE_IMAGE_URI: 537044913382.dkr.ecr.eu-west-1.amazonaws.com/super_food
+
+jobs:
+  build_and_push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: buildx-v4-dev-${{ hashFiles('Pipfile.lock') }}
+          restore-keys: |
+            buildx-v4-dev-
+
+      - name: Build image
+        id: docker_build
+        uses: docker/build-push-action@v3
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          build-args: |
+            GIT_COMMIT_HASH=${{ github.sha }}
+            BUILD_NUMBER=${{ github.run_number }}
+          pull: true
+          push: true
+          tags: |
+            ${{ env.BASE_IMAGE_URI }}:pipfile-${{ hashFiles('Pipfile.lock') }}
+            ${{ env.BASE_IMAGE_URI }}:git-sha-${{ github.sha }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new
+
+      - name: Move cache
+        # Temp fix
+        # https://github.com/docker/build-push-action/issues/252
+        # https://github.com/moby/buildkit/issues/1896
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+  migrate:
+    runs-on: ubuntu-latest
+
+    needs:
+      - build
+
+    # Set environment during migration step, IMHO it's sufficient enough "placeholder" for
+    # deployment. Problem is that deployment jobs are multiple thus github either shows multiple
+    # deployments at the same time for same commit or we need to setup multiple environments.
+    # Neither solution is very pretty, but I think setting this at migration will be good now.
+#    environment:
+#      name: ${{ inputs.stage_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+
+      - name: Deploy migrations to ${{ inputs.stage_name }}
+        run: |
+          ./bin/ecs_deploy.sh \
+            -c "superfood" \
+            -d "db-migrate" \
+            -r "eu-west-1" \
+            -i "${{ env.BASE_IMAGE_URI }}:git-sha-${{ github.sha }}" \
+            --max-definitions 10 \
+
+      - name: Run migrations in superfood
+        run: |
+          ./bin/run_ecs_task.sh eu-west-1 "super-food" "db-migrate"
+
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy webserver to super-food
+
+    needs:
+      - migrate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+
+      - name: Deploy webserver to super-food
+        run: |
+          ./bin/ecs_deploy.sh \
+            -c "superfood" \
+            -n "webserver" \
+            -r "eu-west-1" \
+            -i "${{ env.BASE_IMAGE_URI }}:git-sha-${{ github.sha }}" \
+            --max-definitions 10 \
+            -t 600
