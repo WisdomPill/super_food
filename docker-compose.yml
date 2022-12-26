@@ -1,0 +1,27 @@
+version: '3'
+services:
+  postgres:
+    image: postgres:12.6
+    ports:
+      - '5432:5432'
+    env_file:
+      - docker/postgres.env
+    networks:
+      default:
+        ipv4_address: 172.28.0.3
+
+  redis:
+    image: redis:5.0.6
+    ports:
+      - '6379:6379'
+    networks:
+      default:
+        ipv4_address: 172.28.0.4
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+      - subnet: 172.28.0.0/24

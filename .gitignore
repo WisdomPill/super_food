@@ -1,0 +1,9 @@
+.idea
+*.DS_Store
+db.sqlite3
+__pycache__
+media/
+
+dump.json
+.venv
+junit-xml-reports
